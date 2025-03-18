@@ -6,20 +6,34 @@ import java.nio.file.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class POP3Server {
     private static final int PORT = 110;
+    private static final int MAX_THREADS = 10; // Maximum number of threads
+    private static final int QUEUE_CAPACITY = 20; // Maximum number of queued connections
 
     public static void main(String[] args) {
+        ExecutorService threadPool = new ThreadPoolExecutor(
+                MAX_THREADS, MAX_THREADS, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(QUEUE_CAPACITY),
+                new ThreadPoolExecutor.AbortPolicy() // Reject new tasks when the queue is full
+        );
+
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Serveur POP3 en écoute sur le port " + PORT);
-
             while (true) {
-                Socket clientSocket = serverSocket.accept();
-                new Thread(new POP3Handler(clientSocket)).start();
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    threadPool.execute(new POP3Handler(clientSocket));
+                } catch (RejectedExecutionException e) {
+                    System.err.println("Connexion rejetée : le pool de threads est saturé.");
+                }
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            threadPool.shutdown();
         }
     }
 }
@@ -135,7 +149,7 @@ class POP3Handler implements Runnable {
         }
         Path userDir = Paths.get("src/main/resources/mailserver", username+ "@eoc.dz");
         if (Files.exists(userDir)) {
-            this.user = username+"@eoc.dz";
+            this.user = username;
             out.println("+OK Utilisateur accepte");
         } else {
             out.println("-ERR Utilisateur inconnu");

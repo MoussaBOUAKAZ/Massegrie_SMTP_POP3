@@ -5,6 +5,7 @@ import java.net.*;
 import java.nio.file.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -12,16 +13,30 @@ public class SmtpServer {
     public static final String DOMAIN = "Eoc.dz";
     private static final int PORT = 25;
     static final String MAIL_DIR = "src/main/resources/mailserver/";
+    private static final int MAX_THREADS = 10; // Maximum number of threads
+    private static final int QUEUE_CAPACITY = 20; // Maximum number of queued connections
 
     public static void main(String[] args) {
+        ExecutorService threadPool = new ThreadPoolExecutor(
+                MAX_THREADS, MAX_THREADS, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(QUEUE_CAPACITY),
+                new ThreadPoolExecutor.AbortPolicy() // Reject new tasks when the queue is full
+        );
+
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Serveur SMTP en écoute sur le port " + PORT);
             while (true) {
-                Socket clientSocket = serverSocket.accept();
-                new Thread(new SmtpHandler(clientSocket)).start();
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    threadPool.execute(new SmtpHandler(clientSocket));
+                } catch (RejectedExecutionException e) {
+                    System.err.println("Connexion rejetée : le pool de threads est saturé.");
+                }
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            threadPool.shutdown();
         }
     }
 }
