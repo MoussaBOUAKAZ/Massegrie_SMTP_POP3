@@ -15,7 +15,22 @@ public class SmtpServer {
     static final String MAIL_DIR = "src/main/resources/mailserver/";
     private static final int MAX_THREADS = 10; // Maximum number of threads
     private static final int QUEUE_CAPACITY = 20; // Maximum number of queued connections
-
+    private static void logRejectedConnection() {
+        try {
+            Path logDir = Paths.get(MAIL_DIR, "logs");
+            if (!Files.exists(logDir)) {
+                Files.createDirectories(logDir);
+            }
+            String timestamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+            Path logFile = logDir.resolve("rejected_connections.log");
+            String logEntry = "Rejected connection at " + timestamp + "\n";
+            Files.write(logFile, logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            System.out.println("Connexion rejetée enregistrée dans le journal : " + logFile);
+            logRejectedConnection();
+        } catch (IOException e) {
+            System.err.println("Erreur lors de l'enregistrement de la connexion rejetée : " + e.getMessage());
+        }
+    }
     public static void main(String[] args) {
         ExecutorService threadPool = new ThreadPoolExecutor(
                 MAX_THREADS, MAX_THREADS, 0L, TimeUnit.MILLISECONDS,

@@ -149,7 +149,7 @@ class POP3Handler implements Runnable {
         }
         Path userDir = Paths.get("src/main/resources/mailserver", username+ "@eoc.dz");
         if (Files.exists(userDir)) {
-            this.user = username;
+            this.user = username+"@eoc.dz";
             out.println("+OK Utilisateur accepte");
         } else {
             out.println("-ERR Utilisateur inconnu");
@@ -250,7 +250,7 @@ class POP3Handler implements Runnable {
     private void handleStat() {
         int messageCount = 0;
         long totalSize = 0;
-
+        loadEmails();
         for (int i = 0; i < emails.size(); i++) {
             if (!markedForDeletion.contains(i)) {
                 messageCount++;
@@ -266,6 +266,7 @@ class POP3Handler implements Runnable {
     }
 
     private void handleList(String arg) {
+        loadEmails();
         if (arg.isEmpty()) {
             out.println("+OK Liste des messages");
             for (int i = 0; i < emails.size(); i++) {
