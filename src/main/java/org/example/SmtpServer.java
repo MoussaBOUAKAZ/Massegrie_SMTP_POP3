@@ -1,8 +1,11 @@
 package org.example;
 
+import org.example.auth.AuthenticationService;
+
 import java.io.*;
 import java.net.*;
 import java.nio.file.*;
+import java.rmi.Naming;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
@@ -15,6 +18,8 @@ public class SmtpServer {
     static final String MAIL_DIR = "src/main/resources/mailserver/";
     private static final int MAX_THREADS = 10; // Maximum number of threads
     private static final int QUEUE_CAPACITY = 20; // Maximum number of queued connections
+    public static final String ACTION_LOG_FILE = "actions.log"; // Log file for actions
+
     private static void logRejectedConnection() {
         try {
             Path logDir = Paths.get(MAIL_DIR, "logs");
@@ -26,12 +31,31 @@ public class SmtpServer {
             String logEntry = "Rejected connection at " + timestamp + "\n";
             Files.write(logFile, logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             System.out.println("Connexion rejetée enregistrée dans le journal : " + logFile);
-            logRejectedConnection();
         } catch (IOException e) {
             System.err.println("Erreur lors de l'enregistrement de la connexion rejetée : " + e.getMessage());
         }
     }
+
+    private AuthenticationService authService;
+
+    public SmtpServer() {
+        try {
+            authService = (AuthenticationService) Naming.lookup("rmi://localhost/AuthenticationService");
+        } catch (Exception e) {
+            System.err.println("Erreur de connexion au serveur RMI : " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
     public static void main(String[] args) {
+        AuthenticationService authService;
+        try {
+            authService = (AuthenticationService) Naming.lookup("rmi://localhost/AuthenticationService");
+        } catch (Exception e) {
+            System.err.println("Erreur de connexion au serveur RMI : " + e.getMessage());
+            return;
+        }
+
         ExecutorService threadPool = new ThreadPoolExecutor(
                 MAX_THREADS, MAX_THREADS, 0L, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(QUEUE_CAPACITY),
@@ -43,7 +67,7 @@ public class SmtpServer {
             while (true) {
                 try {
                     Socket clientSocket = serverSocket.accept();
-                    threadPool.execute(new SmtpHandler(clientSocket));
+                    threadPool.execute(new SmtpHandler(clientSocket, authService)); // Pass authService
                 } catch (RejectedExecutionException e) {
                     System.err.println("Connexion rejetée : le pool de threads est saturé.");
                 }
@@ -58,14 +82,16 @@ public class SmtpServer {
 
 class SmtpHandler implements Runnable {
     private final Socket socket;
+    private final AuthenticationService authService; // Add authService field
     private State state = State.WAITING_FOR_HELO;
     private String sender = null;
     private final Set<String> recipients = new HashSet<>();
     private boolean dataMode = false;
     private final StringBuilder messageData = new StringBuilder();
 
-    public SmtpHandler(Socket socket) {
+    public SmtpHandler(Socket socket, AuthenticationService authService) {
         this.socket = socket;
+        this.authService = authService; // Initialize authService
     }
 
     private enum State {
@@ -82,15 +108,15 @@ class SmtpHandler implements Runnable {
              BufferedWriter out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()))) {
 
             send(out, "220 " + SmtpServer.DOMAIN + " ESMTP Service Ready");
+            logAction("Connection established with client: " + socket.getInetAddress());
 
             String line;
             while ((line = in.readLine()) != null) {
+                logAction("Client: " + line);
                 System.out.println("Client: " + line);
                 String command = line.split(" ")[0].toUpperCase();
                 switch (command) {
                     case "HELO":
-                        handleHelo(out, line);
-                        break;
                     case "EHLO":
                         handleHelo(out, line);
                         break;
@@ -117,6 +143,7 @@ class SmtpHandler implements Runnable {
                         break;
                     case "QUIT":
                         handleQuit(out);
+                        logAction("Client disconnected.");
                         return;
                     default:
                         if (dataMode) {
@@ -128,6 +155,7 @@ class SmtpHandler implements Runnable {
                 }
             }
         } catch (IOException e) {
+            logAction("Error: " + e.getMessage());
             e.printStackTrace();
         } finally {
             try {
@@ -156,12 +184,7 @@ class SmtpHandler implements Runnable {
         // Log the HELO interaction for storage
         saveHeloInteraction(clientDomain);
         state = State.WAITING_FOR_MAIL_FROM;
-        send(out, "250 OK"   + " Hello " + clientDomain );
-       /*
-        send(out, "250-SIZE 10485760");
-        send(out, "250-8BITMIME");
-        send(out, "250-PIPELINING");
-        send(out, "250 OK");*/
+        send(out, "250 OK " + SmtpServer.DOMAIN + " Hello " + clientDomain);    
     }
 
     private void handleMailFrom(BufferedWriter out, String line) throws IOException {
@@ -178,6 +201,20 @@ class SmtpHandler implements Runnable {
 
         if (!isValidEmail(email)) {
             send(out, "553 Invalid sender address: " + email);
+            return;
+        }
+        String senderUsername = email.split("@")[0];
+        try {
+            if (!authService.verifyUser(senderUsername)) { // Verify if the sender exists
+                send(out, "530 Authentication required: Sender address does not exist");
+                return;
+            }
+            else {
+                System.out.println("User checked successfuly");
+
+            }
+        } catch (Exception e) {
+            send(out, "451 Temporary server error: Unable to verify sender");
             return;
         }
 
@@ -200,6 +237,21 @@ class SmtpHandler implements Runnable {
 
         if (!isValidEmail(email)) {
             send(out, "553 Invalid recipient address");
+            return;
+        }
+        String reciverUsername = email.split("@")[0];
+
+        try {
+            if (!authService.verifyUser(reciverUsername)) { // Verify if the recipient exists
+                send(out, "550 Requested action not taken: Reciver address does not exist");
+                return;
+            }
+            else {
+                System.out.println("User checked successfuly");
+
+            }
+        } catch (Exception e) {
+            send(out, "451 Temporary server error: Unable to verify recipient");
             return;
         }
 
@@ -278,7 +330,6 @@ class SmtpHandler implements Runnable {
         if (matcher.find()) {
             return matcher.group(1).trim().toLowerCase(); // Normalisation en minuscules
         }
-
         // Log pour debugging
         System.out.println("Invalid MAIL FROM command: " + line);
         return null;
@@ -340,6 +391,23 @@ class SmtpHandler implements Runnable {
     private void send(BufferedWriter out, String response) throws IOException {
         out.write(response + "\r\n");
         out.flush();
+        logAction("Server: " + response);
         System.out.println("Serveur: " + response);
+    }
+
+    private void logAction(String action) {
+        try {
+            Path logDir = Paths.get(SmtpServer.MAIL_DIR, "logs");
+            if (!Files.exists(logDir)) {
+                Files.createDirectories(logDir);
+            }
+            Path logFile = logDir.resolve(SmtpServer.ACTION_LOG_FILE);
+            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+            String logEntry = "[" + timestamp + "] " + action + "\n";
+            Files.write(logFile, logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            System.out.println("Action logged: " + logEntry.trim());
+        } catch (IOException e) {
+            System.err.println("Error logging action: " + e.getMessage());
+        }
     }
 }

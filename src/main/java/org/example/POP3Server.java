@@ -1,8 +1,10 @@
 package org.example;
 
+import org.example.auth.AuthenticationService;
 import java.io.*;
 import java.net.*;
 import java.nio.file.*;
+import java.rmi.Naming;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
@@ -14,6 +16,14 @@ public class POP3Server {
     private static final int QUEUE_CAPACITY = 20; // Maximum number of queued connections
 
     public static void main(String[] args) {
+        AuthenticationService authService;
+        try {
+            authService = (AuthenticationService) Naming.lookup("rmi://localhost/AuthenticationService");
+        } catch (Exception e) {
+            System.err.println("Erreur de connexion au serveur RMI : " + e.getMessage());
+            return;
+        }
+
         ExecutorService threadPool = new ThreadPoolExecutor(
                 MAX_THREADS, MAX_THREADS, 0L, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(QUEUE_CAPACITY),
@@ -25,7 +35,7 @@ public class POP3Server {
             while (true) {
                 try {
                     Socket clientSocket = serverSocket.accept();
-                    threadPool.execute(new POP3Handler(clientSocket));
+                    threadPool.execute(new POP3Handler(clientSocket, authService)); // Pass authService
                 } catch (RejectedExecutionException e) {
                     System.err.println("Connexion rejetée : le pool de threads est saturé.");
                 }
@@ -41,7 +51,8 @@ public class POP3Server {
 class POP3Handler implements Runnable {
     private enum State { AUTHORIZATION, TRANSACTION, UPDATE }
 
-    private Socket clientSocket;
+    private final Socket clientSocket;
+    private final AuthenticationService authService; // Add authService field
     private BufferedReader in;
     private PrintWriter out;
     private State state;
@@ -50,8 +61,9 @@ class POP3Handler implements Runnable {
     private Set<Integer> markedForDeletion = new HashSet<>();
     private String serverGreeting;
 
-    public POP3Handler(Socket socket) {
+    public POP3Handler(Socket socket, AuthenticationService authService) {
         this.clientSocket = socket;
+        this.authService = authService; // Initialize authService
         this.state = State.AUTHORIZATION;
         this.serverGreeting = generateTimestamp();
     }
@@ -147,43 +159,34 @@ class POP3Handler implements Runnable {
             out.println("-ERR Commande USER deja recue");
             return;
         }
-        Path userDir = Paths.get("src/main/resources/mailserver", username+ "@eoc.dz");
-        if (Files.exists(userDir)) {
-            this.user = username+"@eoc.dz";
-            out.println("+OK Utilisateur accepte");
-        } else {
-            out.println("-ERR Utilisateur inconnu");
+        try {
+            if (authService.verifyUser(username)) { // Verify user existence
+                this.user = username + "@eoc.dz";
+                out.println("+OK Utilisateur accepte");
+            } else {
+                out.println("-ERR Utilisateur inconnu");
+            }
+        } catch (Exception e) {
+            out.println("-ERR Erreur de connexion au serveur RMI");
         }
     }
 
     private void handlePass(String password) {
         if (user != null) {
-            if (verifyPassword(user, password)) {
-                loadEmails();
-                state = State.TRANSACTION;
-                out.println("+OK Authentification reussie");
-            } else {
-                out.println("-ERR Mot de passe incorrect");
+            try {
+                if (authService.verifyPass(password)) { // Verify password
+                    loadEmails();
+                    state = State.TRANSACTION;
+                    out.println("+OK Authentification reussie");
+                } else {
+                    out.println("-ERR Mot de passe incorrect");
+                }
+            } catch (Exception e) {
+                out.println("-ERR Erreur de connexion au serveur RMI");
             }
         } else {
             out.println("-ERR Utilisateur non defini");
         }
-    }
-
-    private boolean verifyPassword(String username, String password) {
-        Path credentialsFile = Paths.get("src/main/resources/mailserver/credentials.txt");
-        try (BufferedReader reader = Files.newBufferedReader(credentialsFile)) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(":");
-                if (parts.length == 2 && parts[0].equals(username) && parts[1].equals(password)) {
-                    return true;
-                }
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return false;
     }
 
     private void handleApop(String arg) {
@@ -197,15 +200,11 @@ class POP3Handler implements Runnable {
             return;
         }
         String username = parts[0];
-        String clientDigest = parts[1];
+        String password = parts[1]; // Assume the second part is the password
 
-        Path userDir = Paths.get("src/main/resources/mailserver", username);
-        if (Files.exists(userDir)) {
-            // Récupérez le mot de passe réel de l'utilisateur
-            String password = "password"; // Remplacez par la méthode appropriée pour obtenir le mot de passe
-            String serverDigest = generateMD5Digest((serverGreeting + password).getBytes());
-
-            if (serverDigest.equals(clientDigest)) {
+        try {
+            // Use verifyCredentials directly
+            if (authService.verifyCredentials(username, password)) {
                 this.user = username;
                 loadEmails();
                 state = State.TRANSACTION;
@@ -213,10 +212,11 @@ class POP3Handler implements Runnable {
             } else {
                 out.println("-ERR Authentification echouee");
             }
-        } else {
-            out.println("-ERR Utilisateur inconnu");
+        } catch (Exception e) {
+            out.println("-ERR Erreur de connexion au serveur RMI");
         }
     }
+
     public static String generateMD5Digest(byte[] input) {
         try {
             // Obtention d'une instance de l'algorithme MD5
