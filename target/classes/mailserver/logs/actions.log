@@ -1,0 +1,14 @@
+[2025-03-31 01:40:37] Server: 220 Eoc.dz ESMTP Service Ready
+[2025-03-31 01:40:37] Connection established with client: /0:0:0:0:0:0:0:1
+[2025-03-31 01:40:41] Client: mai
+[2025-03-31 01:40:41] Server: 502 Command not implemented
+[2025-03-31 01:40:44] Client: helo
+[2025-03-31 01:40:44] Server: 501 Syntax error in parameters or arguments
+[2025-03-31 01:40:47] Client: mai
+[2025-03-31 01:40:47] Server: 502 Command not implemented
+[2025-03-31 01:40:52] Client: helo eoc.dz
+[2025-03-31 01:40:52] Server: 235 Authentication successful
+[2025-03-31 01:41:01] Client: mail from 
+[2025-03-31 01:41:01] Server: 501 Syntax error: Email address must be enclosed in angle brackets
+[2025-03-31 01:41:13] Client: mail from:<bouakaz@eoc.dz>
+[2025-03-31 01:41:13] Server: 250 OK
