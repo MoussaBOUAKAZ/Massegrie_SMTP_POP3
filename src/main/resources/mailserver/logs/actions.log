@@ -12,3 +12,19 @@
 [2025-03-31 01:41:01] Server: 501 Syntax error: Email address must be enclosed in angle brackets
 [2025-03-31 01:41:13] Client: mail from:<bouakaz@eoc.dz>
 [2025-03-31 01:41:13] Server: 250 OK
+[2025-04-14 00:12:44] Server: 220 Eoc.dz ESMTP Service Ready
+[2025-04-14 00:12:44] Connection established with client: /0:0:0:0:0:0:0:1
+[2025-04-14 00:12:50] Client: helo eoc.dz
+[2025-04-14 00:12:50] Server: 250 OK Eoc.dz Hello eoc.dz
+[2025-04-14 00:13:12] Client: mail from:<MOUSSA@eoc.dz>
+[2025-04-14 00:13:12] Server: 250 OK
+[2025-04-14 00:14:33] Client: rcpt to:<karim@eoc.dz>
+[2025-04-14 00:14:33] Server: 250 OK
+[2025-04-14 00:14:37] Client: data
+[2025-04-14 00:14:37] Server: 354 Start mail input; end with <CRLF>.<CRLF>
+[2025-04-14 00:14:58] Client: this a test for storing email with in data base 
+[2025-04-14 00:15:00] Client: .
+[2025-04-14 00:15:00] Server: 250 Message received and stored
+[2025-04-14 00:15:15] Client: quit
+[2025-04-14 00:15:15] Server: 221 Eoc.dz Service closing transmission channel
+[2025-04-14 00:15:15] Client disconnected.

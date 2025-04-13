@@ -203,22 +203,19 @@ class SmtpHandler implements Runnable {
             send(out, "553 Invalid sender address: " + email);
             return;
         }
+
         String senderUsername = email.split("@")[0];
         try {
             if (!authService.verifyUser(senderUsername)) { // Verify if the sender exists
                 send(out, "530 Authentication required: Sender address does not exist");
                 return;
             }
-            else {
-                System.out.println("User checked successfuly");
-
-            }
         } catch (Exception e) {
             send(out, "451 Temporary server error: Unable to verify sender");
             return;
         }
 
-        sender = email;
+        sender = senderUsername;
         state = State.WAITING_FOR_RCPT_TO;
         send(out, "250 OK");
     }
@@ -239,23 +236,19 @@ class SmtpHandler implements Runnable {
             send(out, "553 Invalid recipient address");
             return;
         }
-        String reciverUsername = email.split("@")[0];
 
+        String recipientUsername = email.split("@")[0];
         try {
-            if (!authService.verifyUser(reciverUsername)) { // Verify if the recipient exists
-                send(out, "550 Requested action not taken: Reciver address does not exist");
+            if (!authService.verifyUser(recipientUsername)) { // Verify if the recipient exists
+                send(out, "550 Requested action not taken: Recipient address does not exist");
                 return;
-            }
-            else {
-                System.out.println("User checked successfuly");
-
             }
         } catch (Exception e) {
             send(out, "451 Temporary server error: Unable to verify recipient");
             return;
         }
 
-        recipients.add(email);
+        recipients.add(recipientUsername);
         state = State.WAITING_FOR_DATA;
         send(out, "250 OK");
     }
@@ -277,11 +270,24 @@ class SmtpHandler implements Runnable {
             reset();
             return;
         }
+
         if (line.equals(".")) {
             dataMode = false;
-            saveEmail(); // Save the email after receiving the message
+
+            // Insert the email into the database
+            try {
+                String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+                for (String recipient : recipients) {
+                    authService.storeEmail(sender, recipient, "No Subject", messageData.toString(), timestamp);
+                }
+                send(out, "250 Message received and stored");
+            } catch (Exception e) {
+                send(out, "451 Temporary server error: Unable to store email");
+                e.printStackTrace();
+            }
+
+            reset();
             state = State.WAITING_FOR_MAIL_FROM; // Return to MAIL FROM state
-            send(out, "250 Message received");
         } else {
             messageData.append(line).append("\r\n");
         }
@@ -293,8 +299,27 @@ class SmtpHandler implements Runnable {
     }
 
     private void handleVrfy(BufferedWriter out, String line) throws IOException {
-        // Implement VRFY command handling as per RFC 5321
-        send(out, "252 Cannot VRFY user, but will accept message and attempt delivery");
+        // Extract the email address from the VRFY command
+        String[] parts = line.split("\\s+", 2);
+        if (parts.length < 2 || !isValidEmail(parts[1].trim())) {
+            send(out, "501 Syntax error in parameters or arguments"); // Invalid syntax
+            return;
+        }
+
+        String email = parts[1].trim();
+        String username = email.split("@")[0]; // Extract the username from the email
+
+        try {
+            // Check if the user exists in the database
+            if (authService.verifyUser(username)) {
+                send(out, "250 User exists: " + email); // User exists
+            } else {
+                send(out, "550 User not found: " + email); // User does not exist
+            }
+        } catch (Exception e) {
+            send(out, "451 Temporary server error: Unable to verify user"); // Handle errors
+            e.printStackTrace();
+        }
     }
 
     private void handleExpn(BufferedWriter out, String line) throws IOException {

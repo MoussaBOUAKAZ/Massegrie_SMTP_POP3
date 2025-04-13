@@ -161,7 +161,7 @@ class POP3Handler implements Runnable {
         }
         try {
             if (authService.verifyUser(username)) { // Verify user existence
-                this.user = username + "@eoc.dz";
+                this.user = username  ;
                 out.println("+OK Utilisateur accepte");
             } else {
                 out.println("-ERR Utilisateur inconnu");
@@ -174,8 +174,8 @@ class POP3Handler implements Runnable {
     private void handlePass(String password) {
         if (user != null) {
             try {
-                if (authService.verifyPass(password)) { // Verify password
-                    loadEmails();
+                if (authService.verifyPass(user, password)) { 
+                    // loadEmails();
                     state = State.TRANSACTION;
                     out.println("+OK Authentification reussie");
                 } else {
@@ -206,7 +206,7 @@ class POP3Handler implements Runnable {
             // Use verifyCredentials directly
             if (authService.verifyCredentials(username, password)) {
                 this.user = username;
-                loadEmails();
+                // loadEmails();
                 state = State.TRANSACTION;
                 out.println("+OK APOP authentification reussie");
             } else {
@@ -237,129 +237,130 @@ class POP3Handler implements Runnable {
 
     private void loadEmails() {
         emails.clear();
-        Path userDir = Paths.get("src/main/resources/mailserver", user);
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(userDir, "*.txt")) {
-            for (Path file : stream) {
-                emails.add(file);
+        try {
+            List<Map<String, Object>> emailRecords = authService.getEmailsForRecipient(user); // Fetch emails from the database
+            for (Map<String, Object> emailRecord : emailRecords) {
+                Path tempFile = Files.createTempFile("email_", ".txt");
+                try (BufferedWriter writer = Files.newBufferedWriter(tempFile)) {
+                    writer.write("From: " + emailRecord.get("sender") + "\n");
+                    writer.write("To: " + emailRecord.get("recipient") + "\n");
+                    writer.write("Subject: " + emailRecord.get("subject") + "\n");
+                    writer.write("\n");
+                    writer.write((String) emailRecord.get("content"));
+                }
+                emails.add(tempFile);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
+            out.println("-ERR Erreur lors du chargement des emails");
         }
     }
 
     private void handleStat() {
-        int messageCount = 0;
-        long totalSize = 0;
-        loadEmails();
-        for (int i = 0; i < emails.size(); i++) {
-            if (!markedForDeletion.contains(i)) {
-                messageCount++;
-                try {
-                    totalSize += Files.size(emails.get(i));
-                } catch (IOException e) {
-                    out.println("-ERR Impossible de lire le fichier");
-                    return;
-                }
-            }
+        try {
+            Map<String, Integer> stats = authService.getStatisticsForRecipientExcludingDeleted(user);
+            int messageCount = stats.getOrDefault("email_count", 0);
+            int totalSize = stats.getOrDefault("total_size", 0);
+
+            out.println("+OK " + messageCount + " " + totalSize);
+        } catch (Exception e) {
+            out.println("-ERR Erreur lors de la récupération des statistiques");
         }
-        out.println("+OK " + messageCount + " " + totalSize);
     }
 
     private void handleList(String arg) {
-        loadEmails();
-        if (arg.isEmpty()) {
-            out.println("+OK Liste des messages");
-            for (int i = 0; i < emails.size(); i++) {
-                if (!markedForDeletion.contains(i)) {
-                    try {
-                        long size = Files.size(emails.get(i));
-                        out.println((i + 1) + " " + size);
-                    } catch (IOException e) {
-                        out.println("-ERR Impossible de lire le fichier");
-                    }
+        try {
+            List<Map<String, Object>> messages = authService.getMessageIdsAndLengthsExcludingDeleted(user);
+            if (arg.isEmpty()) {
+                out.println("+OK Liste des messages");
+                for (int i = 0; i < messages.size(); i++) {
+                    Map<String, Object> message = messages.get(i);
+                    out.println((i + 1) + " " + message.get("length"));
                 }
-            }
-            out.println(".");
-        } else {
-            try {
+                out.println(".");
+            } else {
                 int index = Integer.parseInt(arg) - 1;
-                if (index < 0 || index >= emails.size() || markedForDeletion.contains(index)) {
+                if (index < 0 || index >= messages.size()) {
                     out.println("-ERR Aucun message avec ce numéro");
                     return;
                 }
-                long size = Files.size(emails.get(index));
-                out.println("+OK " + (index + 1) + " " + size);
-            } catch (NumberFormatException | IOException e) {
-                out.println("-ERR Numéro de message invalide");
+                Map<String, Object> message = messages.get(index);
+                out.println("+OK " + (index + 1) + " " + message.get("length"));
             }
+        } catch (Exception e) {
+            out.println("-ERR Erreur lors de la récupération de la liste des messages");
         }
     }
 
     private void handleRetr(String arg) {
         try {
-            int index = Integer.parseInt(arg) - 1;
-            if (index < 0 || index >= emails.size() || markedForDeletion.contains(index)) {
-                out.println("-ERR Aucun message avec ce numéro");
+            int emailId = Integer.parseInt(arg); // Parse the email ID from the argument
+            Map<String, Object> email = authService.getEmailContentById(emailId); // Fetch email content by ID
+
+            if (email == null) {
+                out.println("-ERR Aucun message avec ce numéro"); 
                 return;
             }
 
-            Path emailPath = emails.get(index);
-            long size = Files.size(emailPath);
-            out.println("+OK " + size + " octets");
-
-            try (BufferedReader reader = Files.newBufferedReader(emailPath)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    out.println(line);
-                }
-            }
+            String content = (String) email.get("content");
+            out.println("+OK " + content.length() + " octets");
+            out.println(content); // Print the email content
             out.println(".");
         } catch (NumberFormatException e) {
-            out.println("-ERR Numéro de message invalide");
-        } catch (IOException e) {
-            out.println("-ERR Erreur lors de la lecture du message");
+            out.println("-ERR Argument invalide"); // Invalid argument format
+        } catch (Exception e) {
+            out.println("-ERR Erreur lors de la récupération du message"); // General error
         }
     }
 
     private void handleDele(String arg) {
         try {
-            int index = Integer.parseInt(arg) - 1;
-            if (index < 0 || index >= emails.size() || markedForDeletion.contains(index)) {
+            int emailId = Integer.parseInt(arg);
+            if (authService.markEmailAsDeleted(emailId)) { // Mark email as deleted in the database
+                out.println("+OK Message " + arg + " marqué pour suppression");
+            } else {
                 out.println("-ERR Aucun message avec ce numéro");
-                return;
             }
-            markedForDeletion.add(index);
-            out.println("+OK Message " + arg + " marqué pour suppression");
         } catch (NumberFormatException e) {
-            out.println("-ERR Numéro de message invalide");
+            out.println("-ERR Argument invalide"); // Invalid argument format
+        } catch (Exception e) {
+            out.println("-ERR Erreur lors de la suppression du message"); // General error
         }
     }
 
     private void handleRset() {
-        markedForDeletion.clear();
-        out.println("+OK Toutes les suppressions ont été annulées");
+        try {
+            if (authService.unmarkAllDeletedEmails(user)) { // Unmark all deleted emails for the recipient
+                out.println("+OK Toutes les suppressions ont été annulées");
+            } else {
+                out.println("+OK Aucune suppression à annuler");
+            }
+        } catch (Exception e) {
+            out.println("-ERR Erreur lors de l'annulation des suppressions");
+        }
     }
 
     private void handleUidl(String arg) {
-        if (arg.isEmpty()) {
-            out.println("+OK Liste des identifiants uniques");
-            for (int i = 0; i < emails.size(); i++) {
-                if (!markedForDeletion.contains(i)) {
-                    out.println((i + 1) + " " + generateUniqueId(emails.get(i)));
+        try {
+            List<Map<String, Object>> emailRecords = authService.getEmailsForRecipient(user); // Fetch emails from the database
+            if (arg.isEmpty()) {
+                out.println("+OK Liste des identifiants uniques");
+                for (int i = 0; i < emailRecords.size(); i++) {
+                    Map<String, Object> emailRecord = emailRecords.get(i);
+                    out.println((i + 1) + " " + emailRecord.get("id"));
                 }
-            }
-            out.println(".");
-        } else {
-            try {
+                out.println(".");
+            } else {
                 int index = Integer.parseInt(arg) - 1;
-                if (index < 0 || index >= emails.size() || markedForDeletion.contains(index)) {
+                if (index < 0 || index >= emailRecords.size()) {
                     out.println("-ERR Aucun message avec ce numéro");
                     return;
                 }
-                out.println("+OK " + (index + 1) + " " + generateUniqueId(emails.get(index)));
-            } catch (NumberFormatException e) {
-                out.println("-ERR Numéro de message invalide");
+                Map<String, Object> emailRecord = emailRecords.get(index);
+                out.println("+OK " + (index + 1) + " " + emailRecord.get("id"));
             }
+        } catch (Exception e) {
+            out.println("-ERR Erreur lors de la récupération des identifiants uniques");
         }
     }
 
@@ -402,22 +403,21 @@ class POP3Handler implements Runnable {
         if (state == State.AUTHORIZATION) {
             out.println("+OK Déconnexion en cours");
         } else {
-            applyDeletions();
-            out.println("+OK Déconnexion en cours");
+            try {
+                if (authService.deleteMarkedEmails(user)) { // Delete emails marked as deleted for the user
+                    System.out.println("Messages marked as deleted have been removed for user: " + user);
+                } else {
+                    System.out.println("No messages to delete for user: " + user);
+                }
+            } catch (Exception e) {
+                System.err.println("Error while applying deletions for user: " + user);
+                e.printStackTrace();
+            }            out.println("+OK Déconnexion en cours");
         }
         state = State.UPDATE;
     }
 
-    private void applyDeletions() {
-        for (int index : markedForDeletion) {
-            try {
-                Files.delete(emails.get(index));
-            } catch (IOException e) {
-                System.err.println("Erreur lors de la suppression de " + emails.get(index));
-            }
-        }
-    }
-
+    
     private String generateUniqueId(Path email) {
         try {
             byte[] content = Files.readAllBytes(email);
