@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Emails envoyés</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Emails envoyés</h1>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Expéditeur</th>
+                    <th>Destinataire</th>
+                    <th>Sujet</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="email : ${emails}">
+                    <td th:text="${email.id}"></td>
+                    <td th:text="${email.sender}"></td>
+                    <td th:text="${email.recipient}"></td>
+                    <td th:text="${email.subject}"></td>
+                    <td>
+                        <a th:href="@{/emails/view/{id}(id=${email.id})}" class="btn btn-info btn-sm">Voir</a>
+                        <a th:href="@{/emails/delete/{id}(id=${email.id})}" class="btn btn-danger btn-sm">Supprimer</a>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
