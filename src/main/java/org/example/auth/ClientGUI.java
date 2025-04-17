@@ -1,7 +1,5 @@
 package org.example.auth;
 
-import org.example.auth.AuthenticationService;
-
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;

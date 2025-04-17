@@ -38,4 +38,5 @@ public interface AuthenticationService extends Remote {
     Map<String, Integer> getStatisticsForRecipientExcludingDeleted(String recipient) throws RemoteException, SQLException;
     List<Map<String, Object>> getMessageIdsAndLengthsExcludingDeleted(String recipient) throws RemoteException, SQLException;
 
+    List<Map<String, Object>> getSentEmails(String sender) throws RemoteException, SQLException;
 }
